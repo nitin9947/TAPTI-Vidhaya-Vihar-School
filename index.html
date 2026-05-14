@@ -263,7 +263,7 @@ var LOGO="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAYAAAB/HSuDAAAQ
 // JSONBIN DATABASE LAYER
 // All data stored online at jsonbin.io - FREE
 // ══════════════════════════════════════════════════
-var JKEY = "$2a$10$r0vSySO6SJz6utz7Po6k3uDHvThxQPzZK92xbgrdVT2iLY9rR/JVG";
+var JKEY = "$2a$10$XZiYhfj/S1nisMkBWzek7Oc1YP33cshwQ94caowWTq9huNcj2fLMm";
 var JBASE = "https://api.jsonbin.io/v3";
 var BIN_IDS = {}; // collection name -> bin ID, stored in localStorage
 var CACHE = {};   // in-memory cache for fast rendering
@@ -285,16 +285,24 @@ function saveBinIds(){lSet("tvv_bin_ids", BIN_IDS)}
 // ── Get or create a bin for a collection ─────────────────────────────────
 function getBinId(col){
   return new Promise(function(resolve, reject){
+    // Always reload from localStorage in case page was refreshed
+    var saved = lGet("tvv_bin_ids");
+    if(saved) BIN_IDS = saved;
+    
     if(BIN_IDS[col]){resolve(BIN_IDS[col]);return}
     // Create new bin
     fetch(JBASE+"/b", {
       method:"POST",
-      headers:{"Content-Type":"application/json","X-Master-Key":JKEY,"X-Bin-Name":"tvv_"+col,"X-Bin-Private":"false"},
+      headers:{"Content-Type":"application/json","X-Master-Key":JKEY,"X-Bin-Name":"tvv_"+col},
       body:JSON.stringify([])
     }).then(function(r){return r.json()}).then(function(d){
-      BIN_IDS[col] = d.metadata.id;
-      saveBinIds();
-      resolve(BIN_IDS[col]);
+      if(d.metadata && d.metadata.id){
+        BIN_IDS[col] = d.metadata.id;
+        saveBinIds();
+        resolve(BIN_IDS[col]);
+      } else {
+        reject(new Error("No bin ID in response"));
+      }
     }).catch(reject);
   });
 }
@@ -316,10 +324,10 @@ function writeBin(col, data){
   return getBinId(col).then(function(id){
     return fetch(JBASE+"/b/"+id,{
       method:"PUT",
-      headers:{"Content-Type":"application/json","X-Master-Key":JKEY},
+      headers:{"Content-Type":"application/json","X-Master-Key":JKEY,"X-Bin-Private":"false"},
       body:JSON.stringify(data)
     }).then(function(r){
-      if(!r.ok) throw new Error("Write failed");
+      if(!r.ok) throw new Error("Write failed: "+r.status);
       return r.json();
     });
   });
@@ -339,14 +347,13 @@ function showSync(st){
 var DB = {
   // Get all records from collection (uses cache first, then JSONBin)
   getAll: function(col){
-    if(CACHE[col]) return Promise.resolve(CACHE[col]);
-    // Try JSONBin online first
+    // Always fetch fresh from JSONBin (fixes refresh data loss)
     return readBin(col).then(function(items){
       CACHE[col] = Array.isArray(items)?items:[];
-      lSet("tvv_"+col, CACHE[col]); // also save locally
+      lSet("tvv_"+col, CACHE[col]); // backup locally
       return CACHE[col];
     }).catch(function(){
-      // Offline fallback
+      // Offline fallback - use localStorage
       IS_ONLINE = false;
       showSync("offline");
       var local = lGet("tvv_"+col)||[];
